@@ -75,6 +75,49 @@ source_and_nosource %>% ungroup() %>% filter(id %in% c("001","104901")) %>% ggpl
   geom_vline(xintercept = 78.3*100, colour = "red") + facet_wrap(~ id)
 
 
+# Bold section: Working with all of the data. Going to untar everything, then sample some of the resulting sets, probably like 50% 
+  # ids range from 100001 to 109700, will sample from this
+#untar("training.tar.gz")
+
+
+train_answers <- read_csv("trainingAnswers.csv") %>% mutate(RunID = as.character(RunID))
+train_size <- train_answers %>% summarize(n = n())
+
+sample_frac <- 0.25
+n_files <- floor(train_size$n * sample_frac ) # If I dont have this set to floor it takes forever to run, might also just need to de-frag
+samp_files <- sample(1:train_size$n, n_files)
+n_files_names <- sprintf("%0.4d", samp_files)
+file_names <- paste0("training/10", n_files_names, ".csv")
+
+# Need to do some summarizing, will run in lapply then condense
+condenser <- function(file_name){
+  rad_run <- read_csv(file_name, col_names = F) %>% mutate(id = substr(file_name, start = 10, stop = 15))
+  names(rad_run) <- c("dt", "rad", "id")
+  
+  rad_run <- rad_run %>% mutate(time = cumsum(dt), centiseconds = floor(time / 10000)) %>% group_by(id, centiseconds) %>%
+    summarize(total = sum(rad),
+              avg = mean(rad),
+              max_rad = max(rad),
+              min_rad = min(rad),
+              spread_rad = max_rad - min_rad,
+              spread_scaled = spread_rad * max_rad,
+              sd_rad = sd(rad)) %>% select(-min_rad, -spread_rad)
+  return(rad_run)
+}
+extract_half <- lapply(file_names, condenser) %>% bind_rows()
+
+train_split <- train_answers %>% filter(!is.na(SourceTime)) %>% split(train_answers$SourceID)
+
+# Also want to look into this with respect to scaled spread, just dont want to reload data (current spread_scaled not excessively useful)
+extract_half %>% filter(id %in% train_split[[2]]$RunID[1:4])  %>% 
+  ggplot(aes(x = centiseconds, y = total)) +
+  geom_point() + geom_line(colour = "cyan") + ggtitle("Some HEU incidents") + xlab("Time in centiseconds") + ylab("Total Count") +
+  geom_vline(xintercept = train_split[[2]]$SourceTime[1:2]*100, colour = rep(c("red", "green"), 2)) +
+  facet_wrap(~ id, scales = "free") 
+
+
+
+
  # # # # # # # # Separate part, has to do with the chemical curves not the vehicle readings # # # # # # # # # # 
 # Identifying the curves
 SourceData <- read_csv("SourceInfov3/SourceData.csv")
