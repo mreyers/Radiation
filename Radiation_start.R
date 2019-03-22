@@ -1,5 +1,6 @@
 # Radiation Prediction Project
 library(tidyverse)
+
 training <- untar("training.tar.gz", list = T)
 untar("training.tar.gz", files = c("training/100001.csv",
                                    "training/100002.csv",
@@ -159,4 +160,33 @@ ratio_Count %>% ungroup() %>% filter(SourceType %in% "HEU") %>% ggplot(aes(x = P
 ratio_Count %>% ungroup() %>% filter(SourceType %in% "99mTc") %>% ggplot(aes(x = PhotonEnergy, y = ratio_count)) +
   geom_point() +
   geom_line(colour = "Black")
+
+
+# Exploring just one type of radiation pattern for now
+answers <- read_csv("trainingAnswers.csv",
+                    col_types = list(col_integer(), col_integer(), col_double()))
+
+# Lets do radiation type 1 which I believe is HeU
+heu_training <- answers %>% filter(SourceID %in% 1) %>% select(RunID)
+file_names <- paste0("training/", heu_training$RunID, ".csv")
+
+condenser_fn <- function(file_name){
+  # Do the work on each read in rather than after to save memory, this condenses the data
+  temp <- read_csv(file_name, col_names = F)
+  temp$run <- as.numeric(str_extract(file_name, "[0-9]+"))
+  temp <- temp %>% rename(Time = X1, Count = X2) #%>% left_join(answers, by = c("run" = "RunID"))
+  
+  heu <- temp %>% group_by(run) %>% mutate(time_s = cumsum(Time) / 1000000,
+                                                    time_s_app = round(time_s, 2)) %>% group_by(run, time_s_app) %>%
+    summarize(Count = sum(Count))
+  return(heu)
+}
+
+extract_some <- lapply(file_names, condenser_fn) %>% bind_rows()
+
+# Test plot
+extract_some %>% filter(run %in% 104901) %>% ggplot(aes(x = time_s_app, y = Count)) + geom_line() +
+  ggtitle("Plot for the first Heu Run") + xlab("Time in seconds") + ylab("Count Observed") +
+  geom_vline(xintercept = answers[4901,]$SourceTime, col = "red")
+ 
 
