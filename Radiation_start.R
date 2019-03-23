@@ -185,8 +185,48 @@ condenser_fn <- function(file_name){
 extract_some <- lapply(file_names, condenser_fn) %>% bind_rows()
 
 # Test plot
-extract_some %>% filter(run %in% 104901) %>% ggplot(aes(x = time_s_app, y = Count)) + geom_line() +
+extract_some %>% filter(run %in% c(104901, 104902, 104903, 104904)) %>% ggplot(aes(x = time_s_app, y = Count)) + geom_line() +
   ggtitle("Plot for the first Heu Run") + xlab("Time in seconds") + ylab("Count Observed") +
-  geom_vline(xintercept = answers[4901,]$SourceTime, col = "red")
- 
+  geom_vline(xintercept = answers[4901,]$SourceTime, col = "red") +
+  geom_vline(xintercept = answers[4902,]$SourceTime, col = "blue") +
+  geom_vline(xintercept = answers[4903,]$SourceTime, col = "green") +
+  geom_vline(xintercept = answers[4904,]$SourceTime, col = "orange") +
+  facet_wrap( ~ run)
 
+
+# Change the column to get time distance from closest point
+extract_some <- extract_some %>% 
+  mutate(index = run - 100000,
+         dist_closest = time_s_app - answers$SourceTime[index]) %>%
+  select(-index)
+
+extract_some %>% filter(run %in% c(104901, 104902, 104903, 104904)) %>%
+  ggplot(aes(x = dist_closest, y = Count)) + geom_line() +
+  ggtitle("Plot for the first few Heu Run") + xlab("Time in seconds from closest instance") +
+  ylab("Count Observed") +
+  geom_vline(xintercept = 0, col = "red") +
+  facet_wrap( ~ run)
+
+# How to understand the peaks
+  # They dont all occur at the same time as us being closest
+  # Perhaps it has something to do wtih travel speed
+
+
+# Baseline
+# Lets do radiation type 1 which I believe is HeU
+base_training <- answers %>% filter(SourceID %in% 0) %>% select(RunID) %>% filter(row_number() < 100)
+file_names <- paste0("training/", base_training$RunID, ".csv")
+
+condenser_fn <- function(file_name){
+  # Do the work on each read in rather than after to save memory, this condenses the data
+  temp <- read_csv(file_name, col_names = F)
+  temp$run <- as.numeric(str_extract(file_name, "[0-9]+"))
+  temp <- temp %>% rename(Time = X1, Count = X2) #%>% left_join(answers, by = c("run" = "RunID"))
+  
+  heu <- temp %>% group_by(run) %>% mutate(time_s = cumsum(Time) / 1000000,
+                                           time_s_app = round(time_s, 2)) %>% group_by(run, time_s_app) %>%
+    summarize(Count = sum(Count))
+  return(heu)
+}
+
+extract_base <- lapply(file_names, condenser_fn) %>% bind_rows()
