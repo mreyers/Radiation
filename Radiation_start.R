@@ -207,13 +207,71 @@ extract_some %>% filter(run %in% c(104901, 104902, 104903, 104904)) %>%
   geom_vline(xintercept = 0, col = "red") +
   facet_wrap( ~ run)
 
+
+# Try a differenced time series: Looks a little unexpected, thought there would be more bumpy areas
+extract_some %>% filter(run %in% c(104901, 104902, 104903, 104904)) %>%
+  group_by(run) %>%
+  mutate(diff_Count = Count - lag(Count, default = min(Count))) %>% 
+  ggplot(aes(x = dist_closest, y = diff_Count)) + geom_line() +
+  ggtitle("Plot for the first few Heu Run") + xlab("Time in seconds from closest instance") +
+  ylab("Count Observed") +
+  geom_vline(xintercept = 0, col = "red") +
+  facet_wrap( ~ run)
+
 # How to understand the peaks
   # They dont all occur at the same time as us being closest
   # Perhaps it has something to do wtih travel speed
 
+# Look into the acf of the functions above as it is of interest, high correlations are likely unnatural
+  # Or something similar
+dist_info <- extract_some %>% mutate(time_s = floor(time_s_app)) %>% group_by(run, time_s) %>% summarize(tot_count = sum(Count),
+                                                                                            variation = var(Count))
 
+  # Also want to investigate this as a time series
+library(xts)
+library(zoo)
+# This should generate the desired time series object, only doing on a subset to test functionality
+time_series_info <- extract_some %>% filter(run %in% c(104901, 104902, 104903, 104904)) %>%
+  mutate(time_s = floor(time_s_app)) %>% group_by(time_s, run) %>% 
+  nest() %>% 
+  mutate(acf_res = map(data, ~ acf(.x$Count, plot = FALSE))) %>%
+  mutate(acf_tot = map_dbl(acf_res, ~ sum(abs(.x$acf)))) # R apparently isnt a fan of differenced time series in here
+
+# Something funky going on here
+  # We should expect a time with radiation exposure to have a higher absolute acf than places that are just noisey
+  # Or maybe thats an incorrect assumption
+
+# Quick solution idea: maybe it is how we are keeping track of time
+  # Write a new condeser that condenses on every 5th observation
+condenser_fn_5obs <- function(file_name){
+  # Do the work on each read in rather than after to save memory, this condenses the data
+  temp <- read_csv(file_name, col_names = F)
+  temp$run <- as.numeric(str_extract(file_name, "[0-9]+"))
+  temp <- temp %>% rename(Time = X1, Count = X2) #%>% left_join(answers, by = c("run" = "RunID"))
+  
+  heu <- temp %>% group_by(run) %>% mutate(time_s = cumsum(Time) / 1000000,
+                                           time_s_app = round(time_s, 2),
+                                           fake_row_n = row_number() %/% 5) %>% group_by(run, fake_row_n) %>%
+    summarize(Count = sum(Count),
+              time_start = first(time_s),
+              time_end = last(time_s))
+  return(heu)
+}
+
+# Time is wrong in this
+extract_some_5obs <- lapply(file_names, condenser_fn_5obs) %>% bind_rows()
+
+extract_some_5obs %>% filter(run %in% c(104901, 104902, 104903, 104904)) %>% mutate(time = cumsum(time_taken)) %>%
+  ggplot(aes(x = time, y = Count)) + geom_line() +
+  ggtitle("Plot for the first Heu Run") + xlab("Time in seconds") + ylab("Count Observed") +
+  geom_vline(xintercept = answers[4901,]$SourceTime, col = "red") +
+  geom_vline(xintercept = answers[4902,]$SourceTime, col = "blue") +
+  geom_vline(xintercept = answers[4903,]$SourceTime, col = "green") +
+  geom_vline(xintercept = answers[4904,]$SourceTime, col = "orange") +
+  facet_wrap( ~ run)
 # Baseline
-# Lets do radiation type 1 which I believe is HeU
+# Lets do radiation type 1 which I believe is HeU: already loaded above in extract_some. Specify different SourceID for alternates
+# But before that, lets explore what a "baseline" looks like
 base_training <- answers %>% filter(SourceID %in% 0) %>% select(RunID) %>% filter(row_number() < 100)
 file_names <- paste0("training/", base_training$RunID, ".csv")
 
@@ -230,3 +288,9 @@ condenser_fn <- function(file_name){
 }
 
 extract_base <- lapply(file_names, condenser_fn) %>% bind_rows()
+
+# Dont need to get the answers for the baseline case because there is no signal, it is all noise
+  # Try to classify the amount of noise
+  # Is this a mixture model? I think assuming Gaussian or even Poisson for noise is fair
+    # Can try to extend the EM work with Dani: Should first MLE the distribution parameters across the sample
+
